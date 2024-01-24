@@ -1,0 +1,6 @@
+@DriveSave2_HostAddress = http://localhost:5000
+
+GET {{DriveSave2_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
