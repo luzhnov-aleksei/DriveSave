@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using Newtonsoft.Json;
+using System.Net;
 using System.Threading;
 using System.Xml.Linq;
 using Telegram.Bot;
@@ -12,7 +13,7 @@ namespace DriveSave2.Services
     {
         private readonly ITelegramBotClient _botClient;
         private readonly ILogger<UpdateHandlers> _logger;
-        private static readonly string yandexWeatherApiKey = "KEY";
+        private static readonly string yandexWeatherApiKey = "key";
         private readonly string location = "Moscow";
         
 
@@ -39,32 +40,23 @@ namespace DriveSave2.Services
             var handler = update switch
             {
      
-                { Message: { } message } when message.Text.StartsWith("/weather") => SendWeatherData(message),
-                { Message: { } message } when message.Text.StartsWith("/погода") => TemperatureInCity(message),
-                { Message: { } message } => EchoMessage(message),
+                { Message: { } message } when message.Text.StartsWith("/weather") => SendWeatherData(message, cancellationToken),
+                { Message: { } message } => EchoMessage(message, cancellationToken),
                 _ => Task.CompletedTask
             };
 
             await handler;
         }
-
+        //обращаемся к yandex api weather
         private async Task SendWeatherData(Message message, CancellationToken cancellationToken)
         {
-            string weatherData = await GetWeatherAsync(location);
-            Console.WriteLine("------------------------------------");
-            Console.WriteLine("--------------------", weatherData);
+            Weather weatherData = await GetWeatherAsync(location);
+            string response = "Текущая температура в городе " + weatherData.GeoObject.Locality.Name + " " + weatherData.Fact.Temp +" градусов.";
 
-            const int maxLength = 4000;  // Например, ограничиваем до 4000 символов
-            if (weatherData.Length > maxLength)
-            {
-                weatherData = weatherData.Substring(0, maxLength);
-                Console.WriteLine("--0----0-----0--------0----0------");
-                Console.WriteLine("---0-----0----0----", weatherData);
-            }
 
             await _botClient.SendTextMessageAsync(
                 chatId: message.Chat.Id,
-                text: weatherData,
+                text: response,
                 parseMode: ParseMode.Markdown,
                 disableWebPagePreview: true
             );
@@ -79,55 +71,29 @@ namespace DriveSave2.Services
                 cancellationToken: cancellationToken
             );
         }
-
-        private static async Task<string> GetWeatherAsync(string location)
+        //достаем градусы по городу
+        private static async Task<Weather> GetWeatherAsync(string location)
         {
-            string apiUrl = $"https://api.weather.yandex.ru/v2/forecast/?lat=55.721560&lon=84.929553&lang=ru_RU\",false,$context";
+            string apiUrl = $"https://api.weather.yandex.ru/v2/forecast/?lat=45.0401604&lon=38.9759647&lang=ru_RU";
 
-            using (var client = new WebClient())
+            using (var client = new HttpClient())
             {
-                client.Headers.Add("X-Yandex-API-Key", yandexWeatherApiKey);
-                var response = await client.DownloadStringTaskAsync(apiUrl);
-                return response;
+                client.DefaultRequestHeaders.Add("X-Yandex-API-Key", yandexWeatherApiKey);
+                HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, apiUrl);
+                HttpResponseMessage response = await client.SendAsync(request);
+                Console.WriteLine(response.StatusCode);
+                if (response.StatusCode == HttpStatusCode.OK)
+                {
+                    string message = await response.Content.ReadAsStringAsync();
+                    Weather weather = JsonConvert.DeserializeObject<Weather>(message);
+                    return weather;
+                }
+                else
+                {
+                    return null;
+                }
             }
         }
 
-
-        private static string TemperatureInCity(Message message, CancellationToken cancellationToken)
-        {
-            string result;
-            string cityName = "Краснодар";
-            switch (cityName.ToLower())
-            {
-                case "/столбцы": result = GetTemperature(url: @"https://xml.meteoservice.ru/export/gismeteo/point/9189.xml"); break;
-                case "/минск": result = GetTemperature(url: @"https://xml.meteoservice.ru/export/gismeteo/point/34.xml"); break;
-                case "/барановичи": result = GetTemperature(url: @"https://xml.meteoservice.ru/export/gismeteo/point/9156.xml"); break;
-                default: result = "Такого города я не знаю\n/столбцы\n/минск\n/барановичи\n"; break;
-            }
-
-            return result;
-        }
-
-
-        private static string GetTemperature(string url)
-        {
-            string xml = new WebClient().DownloadString(url);
-            /*Console.WriteLine(xml);*/
-
-            var doc = XDocument.Parse(xml);
-            var forecast = doc.Descendants("MMWEATHER")
-                               .Descendants("REPORT")
-                               .Descendants("TOWN")
-                               .Descendants("FORECAST")
-                               .ToList()[0];
-
-            //Console.WriteLine(town);
-
-            string temperatureMax = forecast.Element("TEMPERATURE").Attribute("max").Value;
-            string temperatureMin = forecast.Element("TEMPERATURE").Attribute("min").Value;
-
-            string result = $"Температура в городе от {temperatureMin} до {temperatureMax}";
-            return result;
-        }
     }
 }
